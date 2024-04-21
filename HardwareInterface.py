@@ -35,7 +35,10 @@ class HardwareInterface:
         self.pins = self.pwm_params.pins
         self.servo_multipliers = np.array([[-1, 1, 1, -1], [1, -1, 1, -1], [1, -1, 1, -1]])
         self.complementary_angle = np.array([[180, 0, 0, 180], [0, 180, 0, 180], [0, 180, 0, 180]])
-        self.physical_calibration_offsets = np.array([[75, 130, 113, 73], [29, 13, 33, 15], [26, 12, 30, 4]])
+        self.physical_calibration_offsets = np.array(
+                    [[4, 2, 0, -4],
+                    [107, 128, 86, 5],
+                    [-55, 31, 65, -21]])
 
         self.create()
 
