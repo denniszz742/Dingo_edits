@@ -1,80 +1,128 @@
 #!/usr/bin/env python3
+from adafruit_servokit import ServoKit
 import numpy as np
 import math as m
 import rospy
-import RPi.GPIO as GPIO
-
-class PWMParams:
-    def __init__(self):
-        for row in self.pins:
-            for pin in row:
-                GPIO.setup(pin, GPIO.OUT)
-                GPIO.output(pin, GPIO.LOW)
-
-    def set_pwm(self, pin, duty_cycle):
-        pwm_instance = GPIO.PWM(pin, self.freq)
-        pwm_instance.start(duty_cycle)
-        return pwm_instance
-
-    def stop_pwm(self, pwm_instance):
-        pwm_instance.stop()
 
 class HardwareInterface:
-    def __init__(self, link):
-        self.pwm_max = 2400
-        self.pwm_min = 370
-        self.link = link
-        self.servo_angles = np.zeros((3,4))
-        self.pwm_params = PWMParams()  # New PWM parameters setup
-        self.pins = np.array([[2, 14, 18, 23], [3, 15, 27, 24], [4, 17, 22, 25]])
-        self.range = 4000
-        self.freq = 250
-        GPIO.setmode(GPIO.BCM)
-        
-        # Define the same configurations for servos
-        self.pins = self.pwm_params.pins
-        self.servo_multipliers = np.array([[-1, 1, 1, -1], [1, -1, 1, -1], [1, -1, 1, -1]])
-        self.complementary_angle = np.array([[180, 0, 0, 180], [0, 180, 0, 180], [0, 180, 0, 180]])
-        self.physical_calibration_offsets = np.array(
-                    [[4, 2, 0, -4],
-                    [107, 128, 86, 5],
-                    [-55, 31, 65, -21]])
+    def __init__(self):
+        self.pi = pigpio.pi()
+        self.pwm_params = PWMParams()
+        self.servo_params = ServoParams()
+        initialize_pwm(self.pi, self.pwm_params)
 
-        self.create()
+    def set_actuator_postions(self, joint_angles):
+        send_servo_commands(self.pi, self.pwm_params, self.servo_params, joint_angles)
+        ##  THis method is used only in the calibrate servos file
+    def set_actuator_position(self, joint_angle, axis, leg):
+        send_servo_command(self.pi, self.pwm_params, self.servo_params, joint_angle, axis, leg)
 
-    def create(self):
-        # Set up PWM signals on all pins, adjusted for servos
-        self.pwm_instances = {}
+
+def pwm_to_duty_cycle(pulsewidth_micros, pwm_params):
+    """Converts a pwm signal (measured in microseconds) to a corresponding duty cycle on the gpio pwm pin
+
+    Parameters
+    ----------
+    pulsewidth_micros : float
+        Width of the pwm signal in microseconds
+    pwm_params : PWMParams
+        PWMParams object
+
+    Returns
+    -------
+    float
+        PWM duty cycle corresponding to the pulse width
+    """
+    return int(pulsewidth_micros / 1e6 * pwm_params.freq * pwm_params.range)
+
+
+def angle_to_pwm(angle, servo_params, axis_index, leg_index):
+    """Converts a desired servo angle into the corresponding PWM command
+
+    Parameters
+    ----------
+    angle : float
+        Desired servo angle, relative to the vertical (z) axis
+    servo_params : ServoParams
+        ServoParams object
+    axis_index : int
+        Specifies which joint of leg to control. 0 is hip abduction servo, 1 is upper leg servo, 2 is lower leg servo.
+    leg_index : int
+        Specifies which leg to control. 0 is front-right, 1 is front-left, 2 is back-right, 3 is back-left.
+
+    Returns
+    -------
+    float
+        PWM width in microseconds
+    """
+    angle_deviation = (
+        angle - servo_params.neutral_angles[axis_index, leg_index]
+    ) * servo_params.servo_multipliers[axis_index, leg_index]
+    pulse_width_micros = (
+        servo_params.neutral_position_pwm
+        + servo_params.micros_per_rad * angle_deviation
+    )
+    return pulse_width_micros
+
+
+def angle_to_duty_cycle(angle, pwm_params, servo_params, axis_index, leg_index):
+    return pwm_to_duty_cycle(
+        angle_to_pwm(angle, servo_params, axis_index, leg_index), pwm_params
+    )
+
+
+def initialize_pwm(pi, pwm_params):
+    for leg_index in range(4):
         for axis_index in range(3):
-            for leg_index in range(4):
-                pin = self.pins[axis_index][leg_index]
-                duty_cycle = self.calculate_duty_cycle(0)  # Default to neutral position
-                self.pwm_instances[pin] = self.pwm_params.set_pwm(pin, duty_cycle)
+            pi.set_PWM_frequency(
+                pwm_params.pins[axis_index, leg_index], pwm_params.freq
+            )
+            pi.set_PWM_range(pwm_params.pins[axis_index, leg_index], pwm_params.range)
 
-    def calculate_duty_cycle(self, angle):
-        # Convert servo angle to duty cycle within PWM range
-        return ((angle / 180) * (self.pwm_max - self.pwm_min) + self.pwm_min) / self.pwm_params.range * 100
 
-    def set_actuator_positions(self, joint_angles):
-        # Rest of your existing code for setting actuator positions, modifying to use PWMParams
-        possible_joint_angles = impose_physical_limits(joint_angles)
-        self.joint_angles_to_servo_angles(possible_joint_angles)
-        
+def send_servo_commands(pi, pwm_params, servo_params, joint_angles):
+    for leg_index in range(4):
+        for axis_index in range(3):
+            duty_cycle = angle_to_duty_cycle(
+                joint_angles[axis_index, leg_index],
+                pwm_params,
+                servo_params,
+                axis_index,
+                leg_index,
+            )
+            pi.set_PWM_dutycycle(pwm_params.pins[axis_index, leg_index], duty_cycle)
+
+
+def send_servo_command(pi, pwm_params, servo_params, joint_angle, axis, leg):
+    duty_cycle = angle_to_duty_cycle(joint_angle, pwm_params, servo_params, axis, leg)
+    pi.set_PWM_dutycycle(pwm_params.pins[axis, leg], duty_cycle)
+
+
+def deactivate_servos(pi, pwm_params):
+    for leg_index in range(4):
+        for axis_index in range(3):
+            # REPLACE THIS WITH AN EQUIVALENT FUNCTION
+            # pi.set_PWM_dutycycle(pwm_params.pins[axis_index, leg_index], 0)
+
+
+    ##  This method is used only in the calibrate servos file will make something similar to command individual actuators. 
+    # def set_actuator_position(self, joint_angle, axis, leg):
+    #     send_servo_command(self.pi, self.pwm_params, self.servo_params, joint_angle, axis, leg)
+    def relax_all_motors(self,servo_list = np.ones((3,4))):
+        """Relaxes desired servos so that they appear to be turned off. 
+
+        Parameters
+        ----------
+        servo_list : 3x4 numpy array of 1's and zeros. Row = Actuator; Column = leg.
+                    If a Given actuator is 0 is 1 it should be deactivated, if it is 0 is should be left on. 
+        """
         for leg_index in range(4):
             for axis_index in range(3):
-                pin = self.pins[axis_index][leg_index]
-                angle = self.servo_angles[axis_index][leg_index]
-                duty_cycle = self.calculate_duty_cycle(angle)
-                self.pwm_instances[pin].ChangeDutyCycle(duty_cycle)
+                if servo_list[axis_index,leg_index] == 1:
+                    self.kit.servo[self.pins[axis_index,leg_index]].angle = None
 
-    def relax_all_motors(self, servo_list=np.ones((3, 4))):
-        for axis_index in range(3):
-            for leg_index in range(4):
-                if servo_list[axis_index, leg_index] == 1:
-                    pin = self.pins[axis_index][leg_index]
-                    self.pwm_instances[pin].ChangeDutyCycle(0)
 
-def joint_angles_to_servo_angles(self,joint_angles):
+    def joint_angles_to_servo_angles(self,joint_angles):
         """Converts joint found via inverse kinematics to the angles needed at the servo using linkage analysis.
 
         Parameters
@@ -236,3 +284,137 @@ def impose_physical_limits(desired_joint_angles):
 
     return np.radians(possible_joint_angles)
 
+################################# TESING HARDWARE INTERFACING ############################
+""" This section can be used to test this hardware interfacing by running this script only and supplying 
+    angles for the legs in the joint space. Uncomment and then run using the command: 
+                        rosrun dingo_servo_interfacing HardwareInterface.py  
+"""
+# from dingo_control.Config import Configuration,Leg_linkage
+
+# configuration = Configuration()
+# linkage = Leg_linkage(configuration)
+# hardware_interface = HardwareInterface(linkage)
+
+# ## Define a position for all legs in the joint space
+# low = [0,30,20]
+# mid = [0,50,-10]
+# high = [0,60,-40]
+# pos = mid #[0,50,0] [low 30,20]
+
+# hip_angle  = m.radians(pos[0])
+# upper_leg_angle = m.radians(pos[1]) #defined accoridng to IK
+# lower_leg_angle = m.radians(pos[2]) #defined accoridng to IK
+
+
+# joint_angles = np.array([[hip_angle,     hip_angle,      hip_angle,      hip_angle      ], 
+#                         [upper_leg_angle,upper_leg_angle,upper_leg_angle,upper_leg_angle], 
+#                         [lower_leg_angle,lower_leg_angle,lower_leg_angle,lower_leg_angle]])
+
+# hardware_interface.set_actuator_postions(joint_angles)
+
+##########################################################################################
+
+
+
+
+# ORIGINAL CODE BELOW
+
+# class HardwareInterface:
+#     def __init__(self):
+#         self.pi = pigpio.pi()
+#         self.pwm_params = PWMParams()
+#         self.servo_params = ServoParams()
+#         initialize_pwm(self.pi, self.pwm_params)
+
+    # def set_actuator_postions(self, joint_angles):
+    #     send_servo_commands(self.pi, self.pwm_params, self.servo_params, joint_angles)
+    #     ##  THis method is used only in the calibrate servos file
+    # def set_actuator_position(self, joint_angle, axis, leg):
+    #     send_servo_command(self.pi, self.pwm_params, self.servo_params, joint_angle, axis, leg)
+
+
+# def pwm_to_duty_cycle(pulsewidth_micros, pwm_params):
+#     """Converts a pwm signal (measured in microseconds) to a corresponding duty cycle on the gpio pwm pin
+
+#     Parameters
+#     ----------
+#     pulsewidth_micros : float
+#         Width of the pwm signal in microseconds
+#     pwm_params : PWMParams
+#         PWMParams object
+
+#     Returns
+#     -------
+#     float
+#         PWM duty cycle corresponding to the pulse width
+#     """
+#     return int(pulsewidth_micros / 1e6 * pwm_params.freq * pwm_params.range)
+
+
+# def angle_to_pwm(angle, servo_params, axis_index, leg_index):
+#     """Converts a desired servo angle into the corresponding PWM command
+
+#     Parameters
+#     ----------
+#     angle : float
+#         Desired servo angle, relative to the vertical (z) axis
+#     servo_params : ServoParams
+#         ServoParams object
+#     axis_index : int
+#         Specifies which joint of leg to control. 0 is hip abduction servo, 1 is upper leg servo, 2 is lower leg servo.
+#     leg_index : int
+#         Specifies which leg to control. 0 is front-right, 1 is front-left, 2 is back-right, 3 is back-left.
+
+#     Returns
+#     -------
+#     float
+#         PWM width in microseconds
+#     """
+#     angle_deviation = (
+#         angle - servo_params.neutral_angles[axis_index, leg_index]
+#     ) * servo_params.servo_multipliers[axis_index, leg_index]
+#     pulse_width_micros = (
+#         servo_params.neutral_position_pwm
+#         + servo_params.micros_per_rad * angle_deviation
+#     )
+#     return pulse_width_micros
+
+
+# def angle_to_duty_cycle(angle, pwm_params, servo_params, axis_index, leg_index):
+#     return pwm_to_duty_cycle(
+#         angle_to_pwm(angle, servo_params, axis_index, leg_index), pwm_params
+#     )
+
+
+# def initialize_pwm(pi, pwm_params):
+#     for leg_index in range(4):
+#         for axis_index in range(3):
+#             pi.set_PWM_frequency(
+#                 pwm_params.pins[axis_index, leg_index], pwm_params.freq
+#             )
+#             pi.set_PWM_range(pwm_params.pins[axis_index, leg_index], pwm_params.range)
+
+
+# def send_servo_commands(pi, pwm_params, servo_params, joint_angles):
+#     for leg_index in range(4):
+#         for axis_index in range(3):
+#             duty_cycle = angle_to_duty_cycle(
+#                 joint_angles[axis_index, leg_index],
+#                 pwm_params,
+#                 servo_params,
+#                 axis_index,
+#                 leg_index,
+#             )
+#             pi.set_PWM_dutycycle(pwm_params.pins[axis_index, leg_index], duty_cycle)
+
+
+# def send_servo_command(pi, pwm_params, servo_params, joint_angle, axis, leg):
+#     duty_cycle = angle_to_duty_cycle(joint_angle, pwm_params, servo_params, axis, leg)
+#     pi.set_PWM_dutycycle(pwm_params.pins[axis, leg], duty_cycle)
+
+
+# def deactivate_servos(pi, pwm_params):
+#     for leg_index in range(4):
+#         for axis_index in range(3):
+#             # REPLACE THIS WITH AN EQUIVALENT FUNCTION
+#             # pi.set_PWM_dutycycle(pwm_params.pins[axis_index, leg_index], 0)
