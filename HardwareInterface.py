@@ -6,10 +6,6 @@ import RPi.GPIO as GPIO
 
 class PWMParams:
     def __init__(self):
-        self.pins = np.array([[2, 14, 18, 23], [3, 15, 27, 24], [4, 17, 22, 25]])
-        self.range = 4000
-        self.freq = 250
-        GPIO.setmode(GPIO.BCM)
         for row in self.pins:
             for pin in row:
                 GPIO.setup(pin, GPIO.OUT)
@@ -30,6 +26,10 @@ class HardwareInterface:
         self.link = link
         self.servo_angles = np.zeros((3,4))
         self.pwm_params = PWMParams()  # New PWM parameters setup
+        self.pins = np.array([[2, 14, 18, 23], [3, 15, 27, 24], [4, 17, 22, 25]])
+        self.range = 4000
+        self.freq = 250
+        GPIO.setmode(GPIO.BCM)
         
         # Define the same configurations for servos
         self.pins = self.pwm_params.pins
