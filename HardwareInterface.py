@@ -6,6 +6,7 @@ import rospy
 from gpiozero import AngularServo
 from time import sleep
 
+
 class HardwareInterface():
     def __init__(self,link):
         self.pwm_max = 2400
