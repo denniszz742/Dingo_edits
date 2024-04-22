@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-from adafruit_servokit import ServoKit
 import numpy as np
 import math as m
 import rospy
+import RPi.GPIO as GPIO
 
 class HardwareInterface:
     def __init__(self):
@@ -11,9 +11,6 @@ class HardwareInterface:
         self.servo_params = ServoParams()
         initialize_pwm(self.pi, self.pwm_params)
 
-    def set_actuator_postions(self, joint_angles):
-        send_servo_commands(self.pi, self.pwm_params, self.servo_params, joint_angles)
-        ##  THis method is used only in the calibrate servos file
     def set_actuator_position(self, joint_angle, axis, leg):
         send_servo_command(self.pi, self.pwm_params, self.servo_params, joint_angle, axis, leg)
 
@@ -323,7 +320,7 @@ def impose_physical_limits(desired_joint_angles):
 #     def __init__(self):
 #         self.pi = pigpio.pi()
 #         self.pwm_params = PWMParams()
-#         self.servo_params = ServoParams()
+#         self. = ServoParams()
 #         initialize_pwm(self.pi, self.pwm_params)
 
     # def set_actuator_postions(self, joint_angles):
