@@ -3,16 +3,14 @@ from adafruit_servokit import ServoKit
 import numpy as np
 import math as m
 import rospy
-from gpiozero import AngularServo
-from time import sleep
 
 class HardwareInterface():
     def __init__(self,link):
         self.pwm_max = 2400
         self.pwm_min = 370
         self.link = link
-        self.servo =AngularServo(4, min_angle=0, max_angle=270, min_pulse_width=0.0005, max_pulse_width=0.0025)
-
+        self.servo_angles = np.zeros((3,4))
+        self.kit = ServoKit(channels=16) #Defininng a new set of servos uising the Adafruit ServoKit LIbrary
         
         """ SERVO INDICES, CALIBRATION MULTIPLIERS AND OFFSETS
             #   ROW:    which joint of leg to control 0:hip, 1: upper leg, 2: lower leg
@@ -24,7 +22,9 @@ class HardwareInterface():
                 #  2  [front_right_lower, front_left_lower, back_right_lower, back_left_lower]] 
 
            'pins' define the physical pin of the servos on the servoboard """
-        self.pins = np.array([[2, 14, 18, 23], [3, 15, 27, 24], [4, 17, 22, 25]])
+        self.pins = np.array([[14,10,2,6], 
+                              [13,9,1,5], 
+                              [12,8,0,4]])
 
         """ 'servo_multipliers' and 'complementary_angle' both work to flip some angles, x, to (180-x) so that movement on each leg is consistent despite
             physical motor oritentation changes """
@@ -45,16 +45,16 @@ class HardwareInterface():
             - Offsets for LOWER leg servos map allign the servo so that it is vertically down at zero degrees. Note that IK requires a transformation of
                 angle_sent_to_servo = (180-angle_from_IK) + 90 degrees to map to this physcial servo location.  """
         self.physical_calibration_offsets = np.array(
-                    [[4, 2, 0, -4],
-                    [107, 128, 86, 5],
-                    [-55, 31, 65, -21]])
+                    [[75, 130, 113, 73],
+                    [29, 13, 33, 15],
+                    [26, 12, 30, 4]])
         #applying calibration values to all servos
         self.create()
 
     def create(self):
         for i in range(16):
-            self.servo.angle.actuation_range = 180
-            self.servo.angle.set_pulse_width_range(self.pwm_min, self.pwm_max)
+            self.kit.servo[i].actuation_range = 180
+            self.kit.servo[i].set_pulse_width_range(self.pwm_min, self.pwm_max)
 
     def set_actuator_postions(self, joint_angles):
         """Converts all angles found via inverse kinematics to the angles needed at the servo by applying multipliers
@@ -75,7 +75,7 @@ class HardwareInterface():
         for leg_index in range(4):
             for axis_index in range(3):
                 try:
-                    self.servo.angle = -60
+                    self.kit.servo[self.pins[axis_index,leg_index]].angle = self.servo_angles[axis_index,leg_index]
                 except:
                     rospy.logwarn("Warning - I2C IO error")
 ## HERE ##
@@ -94,7 +94,7 @@ class HardwareInterface():
         for leg_index in range(4):
             for axis_index in range(3):
                 if servo_list[axis_index,leg_index] == 1:
-                    self.servo.angle = -60
+                    self.kit.servo[self.pins[axis_index,leg_index]].angle = None
 
 
     def joint_angles_to_servo_angles(self,joint_angles):
